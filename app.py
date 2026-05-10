@@ -379,6 +379,19 @@ def stage_progress(stage_id: str) -> tuple[int, int]:
     return answered, len(qs)
 
 
+# Models tried in order — best quality first, falls back on 429/quota errors
+# Ordered by capability; 1.5-era models retired April 2025 so excluded
+GEMINI_MODELS = [
+    "gemini-3-flash-preview",       # Gemini 3 — frontier, fast, free tier
+    "gemini-3.1-flash-lite-preview",# Gemini 3.1 Flash-Lite — cost-efficient workhorse
+    "gemini-2.5-pro",               # Gemini 2.5 Pro — deep reasoning
+    "gemini-2.5-flash",             # Gemini 2.5 Flash — best price/performance
+    "gemini-2.5-flash-lite",        # Gemini 2.5 Flash-Lite — high-volume, low-cost
+    "gemini-2.0-flash",             # Gemini 2.0 Flash — reliable general-purpose
+    "gemini-2.0-flash-lite",        # Gemini 2.0 Flash-Lite — ultra-efficient fallback
+]
+
+
 def stream_development(question_obj: dict, user_input: str):
     context = get_all_answers_context()
     user_msg = (
@@ -388,17 +401,34 @@ def stream_development(question_obj: dict, user_input: str):
         f"Their answer: {user_input}"
     )
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-    for chunk in client.models.generate_content_stream(
-        model="gemini-2.0-flash",
-        contents=user_msg,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            max_output_tokens=1000,
-            temperature=0.9,
-        ),
-    ):
-        if chunk.text:
-            yield chunk.text
+    last_error = None
+
+    for model in GEMINI_MODELS:
+        try:
+            chunks = client.models.generate_content_stream(
+                model=model,
+                contents=user_msg,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    max_output_tokens=1000,
+                    temperature=0.9,
+                ),
+            )
+            # Yield model name as invisible marker then stream
+            for chunk in chunks:
+                if chunk.text:
+                    yield chunk.text
+            return  # success — stop trying further models
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                last_error = f"{model} rate-limited"
+                continue  # try next model
+            else:
+                raise  # non-quota error — surface it immediately
+
+    # All models exhausted
+    yield f"\n\n⚠️ All Gemini models are currently rate-limited. Last error: {last_error}. Wait a minute and try again."
 
 
 # ── SPLASH ────────────────────────────────────────────────────────────────────
