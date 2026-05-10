@@ -1,34 +1,53 @@
+import uuid
 import streamlit as st
 import anthropic
 from data import (
     SHOW_TITLE, SHOW_TAGLINE, SHOW_PREMISE,
     STAGES, QUESTIONS, SYSTEM_PROMPT
 )
+from db import load_session, upsert_entry, update_ai_response, delete_session
 
-# ── PAGE CONFIG ──────────────────────────────────────────────────────────────
+# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="BANDWIDTH — Writers' Room",
+    page_title="CLOUD RED — Writers' Room",
     page_icon="⬡",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
 # ── SESSION STATE ─────────────────────────────────────────────────────────────
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
+if "db_loaded" not in st.session_state:
+    st.session_state.db_loaded = False
+
 if "answers" not in st.session_state:
     st.session_state.answers = {}
+
 if "developments" not in st.session_state:
     st.session_state.developments = {}
+
 if "active_stage" not in st.session_state:
     st.session_state.active_stage = "characters"
+
 if "splash_done" not in st.session_state:
     st.session_state.splash_done = False
+
+# Load from Supabase once per session
+if not st.session_state.db_loaded:
+    saved_answers, saved_devs = load_session(st.session_state.session_id)
+    if saved_answers:
+        st.session_state.answers = saved_answers
+        st.session_state.developments = saved_devs
+        st.session_state.splash_done = True   # skip splash if resuming
+    st.session_state.db_loaded = True
 
 # ── CUSTOM CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Lora:ital,wght@0,400;0,600;1,400&display=swap');
 
-/* ── ROOT ── */
 :root {
     --accent: #ff5a2c;
     --accent2: #ff8c5a;
@@ -48,14 +67,12 @@ st.markdown("""
     --body: 'Lora', serif;
 }
 
-/* ── GLOBAL RESET ── */
 html, body, [class*="css"] {
     font-family: var(--body) !important;
     background-color: var(--bg) !important;
     color: var(--text) !important;
 }
 
-/* Grid background */
 .stApp {
     background-color: var(--bg) !important;
     background-image:
@@ -64,20 +81,17 @@ html, body, [class*="css"] {
     background-size: 36px 36px !important;
 }
 
-/* ── HIDE STREAMLIT CHROME ── */
 #MainMenu, footer, header { visibility: hidden; }
 .stDeployButton { display: none !important; }
-[data-testid="stToolbar"] { display: none !important; }
-[data-testid="stDecoration"] { display: none !important; }
+[data-testid="stToolbar"]      { display: none !important; }
+[data-testid="stDecoration"]   { display: none !important; }
 [data-testid="stStatusWidget"] { display: none !important; }
 
-/* ── MAIN CONTAINER ── */
 .block-container {
     max-width: 780px !important;
     padding: 2rem 1.5rem 4rem !important;
 }
 
-/* ── TYPOGRAPHY ── */
 .bw-display {
     font-family: var(--serif) !important;
     font-size: clamp(52px, 10vw, 80px);
@@ -106,7 +120,6 @@ html, body, [class*="css"] {
     line-height: 1.7;
 }
 
-/* ── PROGRESS BAR ── */
 .stProgress > div > div > div > div {
     background: linear-gradient(90deg, var(--accent), var(--accent2)) !important;
 }
@@ -114,15 +127,11 @@ html, body, [class*="css"] {
     background: var(--border) !important;
 }
 
-/* ── DIVIDER ── */
 hr {
     border: none !important;
     border-top: 1px solid var(--border) !important;
     margin: 1.5rem 0 !important;
 }
-
-/* ── STAGE TABS (radio as pills) ── */
-[data-testid="stHorizontalBlock"] { gap: 8px !important; }
 
 div[data-testid="stRadio"] > div {
     display: flex !important;
@@ -149,7 +158,6 @@ div[data-testid="stRadio"] label:has(input:checked) {
 }
 div[data-testid="stRadio"] input { display: none !important; }
 
-/* ── QUESTION CARDS ── */
 .q-card {
     background: var(--bg2);
     border: 1px solid var(--border);
@@ -188,7 +196,6 @@ div[data-testid="stRadio"] input { display: none !important; }
     margin-bottom: 12px;
 }
 
-/* ── INPUTS ── */
 textarea, .stTextArea textarea {
     background: var(--bg) !important;
     border: 1px solid var(--border2) !important;
@@ -205,7 +212,6 @@ textarea:focus, .stTextArea textarea:focus {
 }
 .stTextArea label { display: none !important; }
 
-/* ── BUTTONS ── */
 .stButton > button {
     background: var(--accent-dim) !important;
     border: 1px solid var(--accent-border) !important;
@@ -224,7 +230,6 @@ textarea:focus, .stTextArea textarea:focus {
 }
 .stButton > button:active { transform: scale(0.98) !important; }
 
-/* ── DEVELOPMENT RESPONSE ── */
 .dev-card {
     background: #07070f;
     border: 1px solid var(--border);
@@ -250,7 +255,6 @@ textarea:focus, .stTextArea textarea:focus {
     white-space: pre-wrap;
 }
 
-/* ── PREMISE EXPANDER ── */
 .streamlit-expanderHeader {
     background: var(--bg2) !important;
     border: 1px solid var(--border) !important;
@@ -272,12 +276,8 @@ textarea:focus, .stTextArea textarea:focus {
     line-height: 1.85 !important;
 }
 
-/* ── SPINNER ── */
-.stSpinner > div {
-    border-top-color: var(--accent) !important;
-}
+.stSpinner > div { border-top-color: var(--accent) !important; }
 
-/* ── ALERTS / INFO ── */
 .stAlert {
     background: var(--bg2) !important;
     border: 1px solid var(--border2) !important;
@@ -286,13 +286,11 @@ textarea:focus, .stTextArea textarea:focus {
     font-family: var(--body) !important;
 }
 
-/* ── SIDEBAR ── */
 [data-testid="stSidebar"] {
     background: var(--bg2) !important;
     border-right: 1px solid var(--border) !important;
 }
 
-/* ── METRIC CARDS ── */
 [data-testid="stMetric"] {
     background: var(--bg2) !important;
     border: 1px solid var(--border) !important;
@@ -312,12 +310,10 @@ textarea:focus, .stTextArea textarea:focus {
     color: var(--accent2) !important;
 }
 
-/* ── SCROLLBAR ── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 
-/* ── SPLASH ── */
 .splash-container {
     text-align: center;
     padding: 80px 20px;
@@ -326,16 +322,6 @@ textarea:focus, .stTextArea textarea:focus {
     align-items: center;
     gap: 8px;
 }
-.splash-year {
-    font-family: var(--mono) !important;
-    font-size: 11px;
-    letter-spacing: 7px;
-    color: var(--accent);
-    opacity: 0.6;
-    margin-bottom: 8px;
-}
-
-/* ── SECTION HEADERS ── */
 .section-header {
     font-family: var(--mono) !important;
     font-size: 10px;
@@ -352,27 +338,26 @@ textarea:focus, .stTextArea textarea:focus {
     margin-bottom: 20px;
     line-height: 1.6;
 }
-
-/* ── GLOW ── */
-.glow-header {
-    position: relative;
-}
-.glow-header::after {
-    content: '';
-    position: absolute;
-    top: -40px; right: -80px;
-    width: 300px; height: 300px;
-    background: radial-gradient(circle, rgba(255,90,44,0.04) 0%, transparent 70%);
-    border-radius: 50%;
-    pointer-events: none;
+.saved-pill {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: #3a7a3a;
+    background: rgba(50,120,50,0.1);
+    border: 1px solid rgba(50,120,50,0.25);
+    border-radius: 10px;
+    padding: 2px 8px;
+    margin-left: 8px;
+    vertical-align: middle;
 }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── HELPERS ──────────────────────────────────────────────────────────────────
+# ── HELPERS ───────────────────────────────────────────────────────────────────
 
-def get_all_answers_context():
+def get_all_answers_context() -> str:
     lines = []
     for stage_qs in QUESTIONS.values():
         for q in stage_qs:
@@ -381,27 +366,26 @@ def get_all_answers_context():
     return "\n".join(lines) if lines else "This is the first input."
 
 
-def total_progress():
+def total_progress() -> int:
     total_qs = sum(len(qs) for qs in QUESTIONS.values())
     answered = len(st.session_state.answers)
     return int((answered / total_qs) * 100)
 
 
-def stage_progress(stage_id):
+def stage_progress(stage_id: str) -> tuple[int, int]:
     qs = QUESTIONS[stage_id]
     answered = sum(1 for q in qs if q["id"] in st.session_state.answers)
     return answered, len(qs)
 
 
-def stream_development(question_obj, user_input):
+def stream_development(question_obj: dict, user_input: str):
     context = get_all_answers_context()
-    user_msg = f"""WHAT'S BEEN DEVELOPED SO FAR:
-{context}
-
-THE WRITER JUST ANSWERED:
-Question: {question_obj['q']}
-Their answer: {user_input}"""
-
+    user_msg = (
+        f"WHAT'S BEEN DEVELOPED SO FAR:\n{context}\n\n"
+        f"THE WRITER JUST ANSWERED:\n"
+        f"Question: {question_obj['q']}\n"
+        f"Their answer: {user_input}"
+    )
     client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
     with client.messages.stream(
         model="claude-sonnet-4-20250514",
@@ -413,54 +397,68 @@ Their answer: {user_input}"""
             yield text
 
 
-# ── SPLASH ───────────────────────────────────────────────────────────────────
+# ── SPLASH ────────────────────────────────────────────────────────────────────
 
 if not st.session_state.splash_done:
-    st.markdown("""
-    <div class="splash-container">
-        <div class="splash-year">2050 · NEURAL STORY ARCHITECTURE</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown('<h1 class="bw-display" style="text-align:center">BANDWIDTH</h1>', unsafe_allow_html=True)
-    st.markdown(f'<p class="bw-tagline" style="text-align:center">{SHOW_TAGLINE}</p>', unsafe_allow_html=True)
-
+    st.markdown(
+        '<div class="splash-container"><div style="font-family:\'DM Mono\',monospace;'
+        'font-size:11px;letter-spacing:7px;color:#ff5a2c;opacity:0.6;margin-bottom:8px">'
+        '2050 · NEURAL STORY ARCHITECTURE</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<h1 class="bw-display" style="text-align:center">CLOUD RED</h1>', unsafe_allow_html=True)
+    st.markdown(
+        f'<p class="bw-tagline" style="text-align:center">{SHOW_TAGLINE}</p>',
+        unsafe_allow_html=True,
+    )
     st.write("")
     st.write("")
-
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button("▸  ENTER THE WRITERS' ROOM", key="splash_btn"):
             st.session_state.splash_done = True
             st.rerun()
-
     st.stop()
 
 
-# ── HEADER ───────────────────────────────────────────────────────────────────
+# ── HEADER ────────────────────────────────────────────────────────────────────
 
 col_title, col_pct = st.columns([3, 1])
 with col_title:
-    st.markdown('<div class="bw-mono">BANDWIDTH · PLOT DEVELOPMENT</div>', unsafe_allow_html=True)
-    st.markdown('<h1 class="bw-display" style="font-size:clamp(36px,6vw,52px)">Writers\' Room</h1>', unsafe_allow_html=True)
-
+    st.markdown('<div class="bw-mono">CLOUD RED · PLOT DEVELOPMENT</div>', unsafe_allow_html=True)
+    st.markdown(
+        "<h1 class=\"bw-display\" style=\"font-size:clamp(36px,6vw,52px)\">Writers' Room</h1>",
+        unsafe_allow_html=True,
+    )
 with col_pct:
     pct = total_progress()
     st.metric("DEVELOPED", f"{pct}%")
 
 st.progress(pct / 100)
+
+sid_short = st.session_state.session_id[:8].upper()
+st.markdown(
+    f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:#2a2a35;'
+    f'letter-spacing:2px;margin-bottom:4px">SESSION · {sid_short} '
+    f'<span class="saved-pill">● SUPABASE SYNC</span></div>',
+    unsafe_allow_html=True,
+)
 st.markdown("<hr>", unsafe_allow_html=True)
 
 
-# ── PREMISE EXPANDER ─────────────────────────────────────────────────────────
+# ── PREMISE EXPANDER ──────────────────────────────────────────────────────────
 
 with st.expander("SERIES PREMISE"):
-    st.markdown(f'<p style="font-family:\'Lora\',serif;font-size:13px;color:#605850;font-style:italic;line-height:1.85">{SHOW_PREMISE}</p>', unsafe_allow_html=True)
+    st.markdown(
+        f'<p style="font-family:\'Lora\',serif;font-size:13px;color:#605850;'
+        f'font-style:italic;line-height:1.85">{SHOW_PREMISE}</p>',
+        unsafe_allow_html=True,
+    )
 
 st.write("")
 
 
-# ── STAGE NAVIGATION ─────────────────────────────────────────────────────────
+# ── STAGE NAVIGATION ──────────────────────────────────────────────────────────
 
 stage_labels = []
 for s in STAGES:
@@ -480,13 +478,17 @@ selected_label = st.radio(
 )
 selected_idx = stage_labels.index(selected_label)
 st.session_state.active_stage = stage_ids[selected_idx]
-
 st.write("")
 
-# Stage header
 active_stage_meta = STAGES[selected_idx]
-st.markdown(f'<div class="section-header">{active_stage_meta["label"].upper()} DEVELOPMENT</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="section-desc">{active_stage_meta["desc"]} — answer as much or as little as you want.</div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div class="section-header">{active_stage_meta["label"].upper()} DEVELOPMENT</div>',
+    unsafe_allow_html=True,
+)
+st.markdown(
+    f'<div class="section-desc">{active_stage_meta["desc"]} — answer as much or as little as you want.</div>',
+    unsafe_allow_html=True,
+)
 
 
 # ── QUESTION CARDS ────────────────────────────────────────────────────────────
@@ -494,22 +496,26 @@ st.markdown(f'<div class="section-desc">{active_stage_meta["desc"]} — answer a
 active_questions = QUESTIONS[st.session_state.active_stage]
 
 for i, q in enumerate(active_questions):
-    qid = q["id"]
+    qid         = q["id"]
     is_answered = qid in st.session_state.answers
-    has_dev = qid in st.session_state.developments
-
+    has_dev     = qid in st.session_state.developments
     answered_class = "answered" if is_answered else ""
 
-    # Card header
-    st.markdown(f"""
-    <div class="q-card {answered_class}">
-        <div class="q-card-label">{q['label'].upper()}</div>
-        <div class="q-card-question">{q['q']}</div>
-        {"<div class='q-answer-preview'>\"" + st.session_state.answers[qid] + "\"</div>" if is_answered else ""}
-    </div>
-    """, unsafe_allow_html=True)
+    preview_html = (
+        f"<div class='q-answer-preview'>\"{st.session_state.answers[qid]}\"</div>"
+        if is_answered else ""
+    )
+    st.markdown(
+        f"""
+        <div class="q-card {answered_class}">
+            <div class="q-card-label">{q['label'].upper()}</div>
+            <div class="q-card-question">{q['q']}</div>
+            {preview_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # Textarea
     current_val = st.session_state.answers.get(qid, "")
     user_input = st.text_area(
         label=q["label"],
@@ -520,71 +526,122 @@ for i, q in enumerate(active_questions):
         label_visibility="collapsed",
     )
 
-    # Develop button
     btn_label = "▸  DEVELOP THIS" if not has_dev else "▸  RE-DEVELOP"
     if st.button(btn_label, key=f"btn_{qid}"):
         if user_input.strip():
-            st.session_state.answers[qid] = user_input.strip()
+            answer_text = user_input.strip()
+            st.session_state.answers[qid] = answer_text
+
+            # Persist answer to Supabase immediately
+            upsert_entry(
+                session_id    = st.session_state.session_id,
+                stage_id      = st.session_state.active_stage,
+                question_id   = qid,
+                question_text = q["q"],
+                user_answer   = answer_text,
+            )
+
+            # Stream AI response
             with st.spinner("Accessing memory fragment..."):
                 full_response = ""
-                response_placeholder = st.empty()
-                for chunk in stream_development(q, user_input.strip()):
+                placeholder = st.empty()
+                for chunk in stream_development(q, answer_text):
                     full_response += chunk
-                    response_placeholder.markdown(f"""
-                    <div class="dev-card">
-                        <div class="dev-label">WRITERS' ROOM RESPONSE</div>
-                        <div class="dev-text">{full_response}▌</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                response_placeholder.empty()
-                st.session_state.developments[qid] = full_response
+                    placeholder.markdown(
+                        f"""
+                        <div class="dev-card">
+                            <div class="dev-label">WRITERS' ROOM RESPONSE</div>
+                            <div class="dev-text">{full_response}▌</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                placeholder.empty()
+
+            st.session_state.developments[qid] = full_response
+
+            # Persist AI response to Supabase
+            update_ai_response(
+                session_id  = st.session_state.session_id,
+                question_id = qid,
+                ai_response = full_response,
+            )
+
             st.rerun()
         else:
             st.warning("Write something first — even a rough idea works.")
 
-    # Show existing development
     if has_dev:
-        st.markdown(f"""
-        <div class="dev-card">
-            <div class="dev-label">WRITERS' ROOM RESPONSE</div>
-            <div class="dev-text">{st.session_state.developments[qid]}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="dev-card">
+                <div class="dev-label">WRITERS' ROOM RESPONSE</div>
+                <div class="dev-text">{st.session_state.developments[qid]}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.write("")
 
 
-# ── SIDEBAR: FULL OVERVIEW ────────────────────────────────────────────────────
+# ── SIDEBAR ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown('<div class="bw-mono" style="margin-bottom:16px">STORY SO FAR</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bw-mono" style="margin-bottom:4px">STORY SO FAR</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:#2a2a35;'
+        f'letter-spacing:2px;margin-bottom:12px">SESSION {sid_short}</div>',
+        unsafe_allow_html=True,
+    )
 
     total_answered = len(st.session_state.answers)
     total_all = sum(len(qs) for qs in QUESTIONS.values())
-
     st.progress(total_answered / total_all if total_all > 0 else 0)
     st.caption(f"{total_answered} of {total_all} questions answered")
-
     st.markdown("<hr>", unsafe_allow_html=True)
 
     if st.session_state.answers:
         for stage in STAGES:
             stage_qs = QUESTIONS[stage["id"]]
-            stage_answers = [(q, st.session_state.answers[q["id"]]) for q in stage_qs if q["id"] in st.session_state.answers]
+            stage_answers = [
+                (q, st.session_state.answers[q["id"]])
+                for q in stage_qs if q["id"] in st.session_state.answers
+            ]
             if stage_answers:
-                st.markdown(f'<div class="bw-mono" style="font-size:9px;margin:12px 0 8px">{stage["icon"]} {stage["label"].upper()}</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="bw-mono" style="font-size:9px;margin:12px 0 8px">'
+                    f'{stage["icon"]} {stage["label"].upper()}</div>',
+                    unsafe_allow_html=True,
+                )
                 for q, ans in stage_answers:
-                    st.markdown(f'<div style="font-size:11px;color:#605850;font-family:\'DM Mono\',monospace;margin-bottom:2px">{q["label"]}</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div style="font-size:12px;font-style:italic;color:#404040;line-height:1.6;margin-bottom:10px">"{ans[:120]}{"..." if len(ans) > 120 else ""}"</div>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div style="font-size:11px;color:#605850;font-family:\'DM Mono\','
+                        f'monospace;margin-bottom:2px">{q["label"]}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    preview = ans[:120] + ("..." if len(ans) > 120 else "")
+                    st.markdown(
+                        f'<div style="font-size:12px;font-style:italic;color:#404040;'
+                        f'line-height:1.6;margin-bottom:10px">"{preview}"</div>',
+                        unsafe_allow_html=True,
+                    )
     else:
-        st.markdown('<p style="font-size:13px;font-style:italic;color:#302828">Nothing yet. Start developing your plot above.</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p style="font-size:13px;font-style:italic;color:#302828">'
+            'Nothing yet. Start developing your plot above.</p>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
     if st.button("↺  RESET EVERYTHING", key="reset_btn"):
-        st.session_state.answers = {}
+        delete_session(st.session_state.session_id)
+        st.session_state.answers      = {}
         st.session_state.developments = {}
         st.session_state.active_stage = "characters"
+        st.session_state.splash_done  = False
+        st.session_state.session_id   = str(uuid.uuid4())
         st.rerun()
 
 
@@ -592,6 +649,7 @@ with st.sidebar:
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown(
-    '<p style="font-family:\'DM Mono\',monospace;font-size:10px;color:#1e1e2e;letter-spacing:3px;text-align:center">BANDWIDTH · SERIES DEVELOPMENT TOOL · 2050</p>',
-    unsafe_allow_html=True
+    '<p style="font-family:\'DM Mono\',monospace;font-size:10px;color:#1e1e2e;'
+    'letter-spacing:3px;text-align:center">CLOUD RED · SERIES DEVELOPMENT TOOL · 2050</p>',
+    unsafe_allow_html=True,
 )
