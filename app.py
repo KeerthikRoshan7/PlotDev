@@ -1,6 +1,7 @@
 import uuid
 import streamlit as st
-import anthropic
+from google import genai
+from google.genai import types
 from data import (
     SHOW_TITLE, SHOW_TAGLINE, SHOW_PREMISE,
     STAGES, QUESTIONS, SYSTEM_PROMPT
@@ -386,15 +387,18 @@ def stream_development(question_obj: dict, user_input: str):
         f"Question: {question_obj['q']}\n"
         f"Their answer: {user_input}"
     )
-    client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-    with client.messages.stream(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_msg}],
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    for chunk in client.models.generate_content_stream(
+        model="gemini-2.0-flash",
+        contents=user_msg,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=1000,
+            temperature=0.9,
+        ),
+    ):
+        if chunk.text:
+            yield chunk.text
 
 
 # ── SPLASH ────────────────────────────────────────────────────────────────────
