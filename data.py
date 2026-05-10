@@ -1,4 +1,4 @@
-SHOW_TITLE = "BANDWIDTH"
+SHOW_TITLE = "CLOUD RED"
 SHOW_TAGLINE = "They needed a server that could feel guilty. Lucky us."
 
 SHOW_PREMISE = """The year is 2050. AI exploitation has reached a new high. The newly elected government convinces the masses that their resources will be reserved — under one condition: one family member per household must be drafted into a secret project. Unknown to the public, the government uses human brains as data servers, exploiting the brain's 2.5 million GB capacity. Exposure to the data mechanisms damages subjects from the inside out.
@@ -146,7 +146,7 @@ QUESTIONS = {
     ],
 }
 
-SYSTEM_PROMPT = """You are a TV writers' room consultant helping develop a webseries called "BANDWIDTH".
+SYSTEM_PROMPT = """You are a TV writers' room consultant helping develop a webseries called "CLOUD RED".
 
 SHOW PREMISE:
 The year is 2050. AI exploitation has reached a new high. The newly elected government convinces the masses that their resources will be reserved — under one condition: one family member per household must be drafted into a secret project. Unknown to the public, the government uses human brains as data servers, exploiting the brain's 2.5 million GB capacity. Exposure to the data mechanisms damages subjects from the inside out. Two protagonists: one outside (a family member gone silent), one inside (a subject whose brain leaks other people's realities into his own).
