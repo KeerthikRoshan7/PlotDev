@@ -7,7 +7,7 @@ from data import SHOW_TITLE, SHOW_TAGLINE, PLOT_PREMISE, STAGES, QUESTIONS, LOAD
 from db import save_development
 
 # --- CONFIG & SECRETS ---
-st.set_page_config(page_title="Bandwidth Dev Tool", page_icon="⬡", layout="centered")
+st.set_page_config(page_title="CLOUD RED Dev Tool", page_icon="⬡", layout="centered")
 
 # Configure Gemini
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
